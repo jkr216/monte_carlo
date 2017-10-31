@@ -1,0 +1,65 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(tidyquant)
+library(tidyverse)
+
+amazon <- "AMZN" %>% 
+    tq_get()
+
+amazon_returns <- 
+  amazon %>%
+  select(date, close) %>% 
+  tq_transmute(mutate_fun = periodReturn, period = "monthly", type = "log")
+
+# Parameters
+N     <- 60 # Number of Stock Price Simulations: how many months to simulate? 60 is five years
+M     <- 50  # Number of Monte Carlo Simulations   
+mean    <- mean(amazon_returns$monthly.returns)
+stdev <- sd(amazon_returns$monthly.returns)
+start_price <- tail(amazon$close, n = 1)
+```
+
+```{r}
+simulation_accum <- function(init, N, mean, stdev) {
+  price_moves <- c(init, exp(rnorm(N, mean, stdev)))
+  accumulate(price_moves, function(x, y) x * y)
+}
+
+starts <- rep(start_price, M) %>%
+  set_names(paste("sim", 1:M, sep = ""))
+
+monte_carlo_simd <- 
+  map_dfc(starts, simulation_accum, N = N, mean = mean, stdev = stdev) 
+
+   monte_carlo_simd <- monte_carlo_simd %>% mutate(day = seq(1:nrow(.)))
+   
+   monte_carlo_simd %>% 
+    gather(simulation, prices, -day) %>% 
+    group_by(simulation) %>% 
+    ggplot(aes(x = day, y = prices, color = simulation)) + 
+     geom_line() + 
+     theme(legend.position = "none") +
+     ylab(paste(M, "monte carlos", sep = " ")) + 
+     xlab(paste(N, "months", sep = " "))
+
+```
+
+
+```{r}
+sim <- tibble(trading_days = 1:N, start_price = tail(amazon$close, n = 1))
+price_init <- tail(amazon$close, n = 1)
+
+nine_steps <- function(x, M) {
+  strides <- c(x, exp(rnorm(M, 0, 1)))
+  accumulate(strides, function(x, y) x * y)
+}
+```
+
