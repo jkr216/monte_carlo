@@ -3,57 +3,92 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
 
 ```{r}
 library(tidyquant)
 library(tidyverse)
 
-amazon <- "AMZN" %>% 
+jpmorgan <- "JPM" %>% 
     tq_get()
 
-amazon_returns <- 
-  amazon %>%
+jpm_returns <- 
+  jpmorgan %>%
   select(date, close) %>% 
   tq_transmute(mutate_fun = periodReturn, period = "monthly", type = "log")
 
 # Parameters
 N     <- 60 # Number of Stock Price Simulations: how many months to simulate? 60 is five years
 M     <- 50  # Number of Monte Carlo Simulations   
-mean    <- mean(amazon_returns$monthly.returns)
-stdev <- sd(amazon_returns$monthly.returns)
-start_price <- tail(amazon$close, n = 1)
-```
+mean    <- mean(jpm_returns$monthly.returns)
+stdev <- sd(jpm_returns$monthly.returns)
 
-```{r}
-simulation_accum <- function(init, N, mean, stdev) {
-  price_moves <- c(init, exp(rnorm(N, mean, stdev)))
-  accumulate(price_moves, function(x, y) x * y)
+#we start with init, then exp rnorm n times wiht mean and sd
+simulation_accum_1 <- function(init_value, N, mean, stdev) {
+    tibble(exp(rnorm(N, mean, stdev))) %>% 
+    `colnames<-`("returns") %>%
+    mutate(growth = accumulate(returns, function(x, y) x * y)) %>% 
+    select(growth)
 }
 
-starts <- rep(start_price, M) %>%
+simulation_accum_2 <- function(init_value, N, mean, stdev) {
+  tibble(c(init_value, exp(rnorm(N, mean, stdev)))) %>% 
+    `colnames<-`("returns") %>%
+  mutate(growth = accumulate(returns, `*`)) %>% 
+  select(growth)
+}
+
+
+starts <- 
+  rep(1, M) %>%
+  set_names(paste("sim", 1:M, sep = ""))
+
+monte_carlo_simd_2 <- 
+  map_dfc(starts, simulation_accum_2, N = N, mean = mean, stdev = stdev) %>% 
+  mutate(day = seq(1:nrow(.))) %>% 
+  select(day, everything())
+
+price_moves <- 
+  tibble(c( 0, exp(rnorm(N, mean, stdev)))) %>% 
+  `colnames<-`("returns") %>% 
+  mutate(growth = cumprod(1+ returns),
+         growth2 = accumulate(returns, `*`))
+
+dollar_growth <- price_moves %>% 
+  mutate(growth = accumulate(1 + returns, `*`),
+         price = accumulate(1 + returns, function(x, y) x * y))
+
+
+starts <- 
+  rep(1, M) %>%
   set_names(paste("sim", 1:M, sep = ""))
 
 monte_carlo_simd <- 
-  map_dfc(starts, simulation_accum, N = N, mean = mean, stdev = stdev) 
-
-   monte_carlo_simd <- monte_carlo_simd %>% mutate(day = seq(1:nrow(.)))
+  map_dfc(starts, simulation_accum_2, N = N, mean = mean, stdev = stdev) %>% 
+  mutate(day = seq(1:nrow(.)))
    
-   monte_carlo_simd %>% 
-    gather(simulation, prices, -day) %>% 
-    group_by(simulation) %>% 
-    ggplot(aes(x = day, y = prices, color = simulation)) + 
+   monte_carlo_simd_2 %>% 
+    gather(simulation, dollar_growth, -day) %>% 
+    group_by(simulation) %>%
+     #filter(day < 6) %>% 
+    ggplot(aes(x = day, y = dollar_growth, color = simulation)) + 
      geom_line() + 
      theme(legend.position = "none") +
      ylab(paste(M, "monte carlos", sep = " ")) + 
-     xlab(paste(N, "months", sep = " "))
+     xlab(paste(N, "months", sep = " ")) 
 
 ```
-
+What's needed? 
+1) price history
+2) convert to log returns
+3) get mean and st dev if are using normal for simulations
+4) first price
+5) the function to run them
+6) visualize with ggplot (add a mean line? or something? filter to min max mean, get creative here)
+7) Cool use case: 
+sp500, by sector, or by etf, run the simulations, then joy plot density
 
 ```{r}
+
 sim <- tibble(trading_days = 1:N, start_price = tail(amazon$close, n = 1))
 price_init <- tail(amazon$close, n = 1)
 
